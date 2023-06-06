@@ -1,21 +1,32 @@
 from __future__ import print_function
 
 import os.path
+import logging
+import base64
+import email
+import html
+
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from pprint import pprint
+from ast import literal_eval
 
 # If modifying these scopes, delete the file token.json.
 SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
+SENDER_EMAIL = "anirudh.skumar.03@gmail.com"
 
 
-def main():
-    """Shows basic usage of the Gmail API.
-    Lists the user's Gmail labels.
-    """
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("GetMail")
+
+gmail = None
+
+def init():
+    """Initializez the client library."""
     creds = None
     # The file token.json stores the user's access and refresh tokens, and is
     # created automatically when the authorization flow completes for the first
@@ -35,18 +46,52 @@ def main():
             token.write(creds.to_json())
 
     try:
+        gmail = build('gmail', 'v1', credentials=creds)
+    except HttpError as error:
+        logger.error(f'An error occurred: {error}')
+    
+    logger.info("Service created")
+    return gmail
+
+def getMessages(service):
+    """Print contents of new emails"""
+    # Call the Gmail API to only get emails from a specific sender
+    results = service.users().messages().list(userId='me', q=f'from:{SENDER_EMAIL}').execute()
+    messages = results.get('messages', [])
+
+    if messages:
+        # Get content of the email
+        for message in messages:
+            msg = service.users().messages().get(userId='me', id=message['id']).execute()
+            skip = True
+            for i in msg.get('payload').get('parts'):
+
+                skip = not skip
+                if skip:
+                    continue
+                
+                ## get the label of the email
+                label = msg.get('labelIds')
+                print(label)
+
+                text = (base64.urlsafe_b64decode(i.get('body').get('data')))
+                text = (text.replace(b'\r\n', b' ')).decode('utf-8')
+                print(text)
+                print()
+            print()
+            
+    else:
+        logger.info('No messages found.')
+
+def main():
+    """Shows basic usage of the Gmail API.
+    Lists the user's Gmail labels.
+    """
+
+    try:
         # Call the Gmail API
-        service = build('gmail', 'v1', credentials=creds)
-        results = service.users().labels().list(userId='me').execute()
-        labels = results.get('labels', [])
-
-        if not labels:
-            print('No labels found.')
-            return
-        print('Labels:')
-        for label in labels:
-            print(label['name'])
-
+        gmail = init()
+        getMessages(gmail)
     except HttpError as error:
         # TODO(developer) - Handle errors from gmail API.
         print(f'An error occurred: {error}')
