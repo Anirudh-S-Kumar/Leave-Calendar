@@ -12,12 +12,14 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from gcsa.google_calendar import GoogleCalendar
+from gcsa.event import Event
 from pprint import pprint
 from ast import literal_eval
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 
 # If modifying these scopes, delete the file token.json.
-SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
+SCOPES = ['https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/gmail.labels', 'https://www.googleapis.com/auth/gmail.modify']
 SENDER_EMAIL = "anirudh.skumar.03@gmail.com"
 REQD_LABEL = "Test"
 DONE_LABEL = "Test/Complete"
@@ -28,9 +30,16 @@ TIME_DELTA_DAY:int = 0
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("GetMail")
 
-after_time = timedelta(hours=TIME_DELTA_HOUR, days=TIME_DELTA_DAY)
-after_time_str = (datetime.now() - after_time).strftime("%Y/%m/%d")
 gmail = None
+labels = {}
+
+def getLabels(service):
+    """Storing all the key-value pairs for label name and labelID"""
+    results = service.users().labels().list(userId='me').execute()
+    # service.users().labels().get(userId='me', id=label[j]).execute().get('name')
+    for i in results.get('labels'):
+        labels[i.get('name')] = i.get('id')
+
 
 def quote_text(text):
     """For a given string, return the text inside single quotes.
@@ -144,8 +153,43 @@ def getEventDetails(service, msg_list):
         event['end'] = quote_text(i[5])
         rval.append(event)
 
-    print(messages)
+    logging.info("Event details processed")
+    return rval
 
+def createEvent(events):
+    """Takes a list of events and creates them on the calendar.
+    """
+    calendar = GoogleCalendar(credentials_path='credentials.json')
+
+    for event in events:
+        start_date = datetime.strptime(event['start'], '%Y/%m/%d').date()
+        end_date = datetime.strptime(event['end'], '%Y/%m/%d').date()
+
+        new_event = Event(
+            summary=f"{event['name']} - {event['category']}",
+            start=start_date,
+            end=end_date,
+        )
+
+        calendar.add_event(new_event)
+        logger.info(f"Event {event['name']}, from {event['start']} to {event['end']}, added to calendar")
+
+def changeLabel(service, labelMap, msg_list):
+    """Takes a list of message IDs and changes their label to DONE_LABEL.
+    """
+    modifyLabels = {
+        "addLabelIds" : [labelMap[DONE_LABEL]],
+        "removeLabelIds" : [labelMap[REQD_LABEL]]
+    }
+
+    for i in msg_list:
+        message = service.users().messages().get(userId='me', id=i).execute()
+        label = message.get('labelIds')
+        for j in range(len(label)):
+            label[j] = service.users().labels().get(userId='me', id=label[j]).execute().get('name')
+        if (DONE_LABEL not in label):
+            service.users().messages().modify(userId='me', id=i, body=modifyLabels).execute()
+            logger.info(f"Message with ID {i} label changed to {DONE_LABEL}")
 
 def main():
     """Shows basic usage of the Gmail API.
@@ -155,9 +199,12 @@ def main():
     try:
         # Call the Gmail API
         gmail = init()
+        getLabels(gmail)
         m_ids: list[str] = getMessages(gmail)
         if (m_ids):
-            getEventDetails(gmail, m_ids)
+            events = getEventDetails(gmail, m_ids)
+            createEvent(events)
+            changeLabel(gmail, labels, m_ids)
 
     except HttpError as error:
         # TODO(developer) - Handle errors from gmail API.
