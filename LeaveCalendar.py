@@ -22,12 +22,15 @@ from datetime import datetime, timedelta, date
 SCOPES = ['https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/gmail.labels', 'https://www.googleapis.com/auth/gmail.modify']
 SENDER_EMAIL = "anirudh.skumar.03@gmail.com"
 REQD_LABEL = "Test"
-DONE_LABEL = "Test/Complete"
 REQD_TEXT = "has been approved by Dofa"
-TIME_DELTA_HOUR: int = 2
-TIME_DELTA_DAY:int = 0
 
-logging.basicConfig(level=logging.INFO)
+## generating query based on log file
+# try:
+#     with open('calendarCreation.log', 'r') as f:
+
+
+
+logging.basicConfig(filename = "caledarCreation.log",level=logging.INFO)
 logger = logging.getLogger("GetMail")
 
 gmail = None
@@ -37,7 +40,7 @@ def getLabels(service):
     """Storing all the key-value pairs for label name and labelID"""
     results = service.users().labels().list(userId='me').execute()
     # service.users().labels().get(userId='me', id=label[j]).execute().get('name')
-    for i in results.get('labels'):
+    for i in results.get('labels'): 
         labels[i.get('name')] = i.get('id')
 
 
@@ -174,9 +177,11 @@ def createEvent(events):
         calendar.add_event(new_event)
         logger.info(f"Event {event['name']}, from {event['start']} to {event['end']}, added to calendar")
 
+# dead code for now
 def changeLabel(service, labelMap, msg_list):
     """Takes a list of message IDs and changes their label to DONE_LABEL.
     """
+    DONE_LABEL = ""
     modifyLabels = {
         "addLabelIds" : [labelMap[DONE_LABEL]],
         "removeLabelIds" : [labelMap[REQD_LABEL]]
@@ -204,11 +209,13 @@ def main():
         if (m_ids):
             events = getEventDetails(gmail, m_ids)
             createEvent(events)
-            changeLabel(gmail, labels, m_ids)
+            
 
     except HttpError as error:
-        # TODO(developer) - Handle errors from gmail API.
         print(f'An error occurred: {error}')
+    
+    finally:
+        logger.info(f"Last Run on {int(datetime.now().timestamp())} {datetime.now()}")
 
 
 if __name__ == '__main__':
