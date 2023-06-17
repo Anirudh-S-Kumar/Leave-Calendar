@@ -6,7 +6,6 @@ import base64
 import email
 import html
 
-
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -18,31 +17,35 @@ from pprint import pprint
 from ast import literal_eval
 from datetime import datetime, timedelta, date
 
+## logging config
+logging.basicConfig(filename = "caledarCreation.log",level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+handler = logging.handlers.TimedRotatingFileHandler('logs/caledarCreation.log', when='W6', interval=4, backupCount=30)
+handler.suffix = '%Y-%m-%d'
+logger.addHandler(handler)
+
+
 # If modifying these scopes, delete the file token.json.
-SCOPES = ['https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/gmail.labels', 'https://www.googleapis.com/auth/gmail.modify']
-SENDER_EMAIL = "anirudh.skumar.03@gmail.com"
-REQD_LABEL = "Test"
-REQD_TEXT = "has been approved by Dofa"
+SCOPES: str = ['https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/gmail.labels', 'https://www.googleapis.com/auth/gmail.modify']
+SENDER_EMAIL: str = "anirudh.skumar.03@gmail.com"
+REQD_LABEL: str = "Test"
+REQD_TEXT: str = "has been approved by Dofa"
+TIME: int = 1
 
 ## generating query based on log file
-# try:
-#     with open('calendarCreation.log', 'r') as f:
+# trying to get the last date of the last email processed
+try:
+    with open("last_run.txt", "r") as f:
+        TIME = int(f.read())
+except FileNotFoundError or ValueError:
+    TIME = 1
 
+QUERY: str = f'from:{SENDER_EMAIL} label:{REQD_LABEL} after:{TIME} "{REQD_TEXT}"'
 
-
-logging.basicConfig(filename = "caledarCreation.log",level=logging.INFO)
-logger = logging.getLogger("GetMail")
 
 gmail = None
 labels = {}
-
-def getLabels(service):
-    """Storing all the key-value pairs for label name and labelID"""
-    results = service.users().labels().list(userId='me').execute()
-    # service.users().labels().get(userId='me', id=label[j]).execute().get('name')
-    for i in results.get('labels'): 
-        labels[i.get('name')] = i.get('id')
-
 
 def quote_text(text):
     """For a given string, return the text inside single quotes.
@@ -89,39 +92,21 @@ def getMessages(service):
     """Returns ID of emails to be processed.
     """
     # Call the Gmail API to only get emails from a specific sender
-    results = service.users().messages().list(userId='me', q=f'from:{SENDER_EMAIL}').execute()
+    results = service.users().messages().list(userId='me', q=QUERY).execute()
     messages = results.get('messages', [])
     rval: list[str] = []
     if messages:
-        # Get content of the email
         for message in messages:
             msg = service.users().messages().get(userId='me', id=message['id']).execute()
             skip = True
             for i in msg.get('payload').get('parts'):
-                # print(datetime.fromtimestamp(int(msg.get('internalDate'))/1000))
                 ## Only looking at every alternate email
                 skip = not skip
                 if skip:
                     continue
-                
-                ## get the label of the email, skip if not REQD_LABEL
-                label = msg.get('labelIds')
-                ## Convert ID to string
-                for j in range(len(label)):
-                    label[j] = service.users().labels().get(userId='me', id=label[j]).execute().get('name')
-
-                if (REQD_LABEL not in label):
-                    continue
-
-                ## Getting the text and filtering it
                 text = (base64.urlsafe_b64decode(i.get('body').get('data')))
-                text = text.decode('utf-8')
-
-                ## If REDQ_TEXT is not in the text, skip
-                if (REQD_TEXT not in text):
-                    continue
-
-                rval.append(message['id'])
+                text = text.decode('utf-8').replace('\r', '')
+                rval.append(text)
                 logger.info(f"Message with ID {message['id']} added to list")
 
         return rval
@@ -133,16 +118,7 @@ def getEventDetails(service, msg_list):
     """
     rval: list[dict] = []
 
-    messages: list[str] = []
-    # Get the text from the email
-    for i in msg_list:
-        message = service.users().messages().get(userId='me', id=i).execute()
-        for j, i in enumerate(message.get('payload').get('parts')):
-            if (not j%2):
-                text = (base64.urlsafe_b64decode(i.get('body').get('data'))).decode('utf-8')
-                text = text.replace('\r', '')
-                messages.append(text)
-    
+    messages: list[str] = msg_list    
     # Process the text
     messages = [i.split('\n') for i in messages]
     messages = [[j for j in i if j] for i in messages]
@@ -204,11 +180,11 @@ def main():
     try:
         # Call the Gmail API
         gmail = init()
-        getLabels(gmail)
         m_ids: list[str] = getMessages(gmail)
+        print(m_ids)
         if (m_ids):
             events = getEventDetails(gmail, m_ids)
-            createEvent(events)
+        #     createEvent(events)
             
 
     except HttpError as error:
@@ -216,6 +192,8 @@ def main():
     
     finally:
         logger.info(f"Last Run on {int(datetime.now().timestamp())} {datetime.now()}")
+        with open('last_run.txt', 'w') as f:
+            f.write(str(int(datetime.now().timestamp())))
 
 
 if __name__ == '__main__':
