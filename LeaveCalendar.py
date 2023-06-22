@@ -5,6 +5,7 @@ import logging
 import base64
 import email
 import html
+import re
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -31,12 +32,13 @@ handler.setFormatter(formatter)
 
 
 # If modifying these scopes, delete the file token.json.
-SCOPES: str = ['https://www.googleapis.com/auth/gmail.readonly',
-               'https://www.googleapis.com/auth/gmail.labels', 'https://www.googleapis.com/auth/gmail.modify']
-SENDER_EMAIL: str = "anirudh.skumar.03@gmail.com"
-REQD_LABEL: str = "Test"
+SCOPES: str = ['https://www.googleapis.com/auth/gmail.readonly',]
+#               'https://www.googleapis.com/auth/gmail.labels', 'https://www.googleapis.com/auth/gmail.modify']
+SENDER_EMAIL: str = "admin-leave@iiitd.ac.in"
+REQD_LABEL: str = "leave-approvals"
 REQD_TEXT: str = "has been approved by Dofa"
 TIME: int = 1
+REMOVE_TAGS = re.compile('<.*?>|&([a-z0-9]+|#[0-9]{1,6}|#x[0-9a-f]{1,6});')
 
 # generating query based on log file
 # trying to get the last date of the last email processed
@@ -47,7 +49,6 @@ except FileNotFoundError or ValueError:
     TIME = 1
 
 QUERY: str = f'from:{SENDER_EMAIL} label:{REQD_LABEL} after:{TIME} "{REQD_TEXT}"'
-
 
 gmail = None
 labels = {}
@@ -105,16 +106,13 @@ def getMessages(service):
         for message in messages:
             msg = service.users().messages().get(
                 userId='me', id=message['id']).execute()
-            skip = True
-            for i in msg.get('payload').get('parts'):
-                # Only looking at every alternate email
-                skip = not skip
-                if skip:
-                    continue
-                text = (base64.urlsafe_b64decode(i.get('body').get('data')))
-                text = text.decode('utf-8').replace('\r', '')
-                rval.append(text)
-                logger.info(f"Message with ID {message['id']} added to list")
+            temp = (msg.get('payload').get('body').get('data'))
+            text = (base64.urlsafe_b64decode(temp))
+
+            text = text.replace(b'<br />', b"\n").decode('utf-8')
+            text = (re.sub(REMOVE_TAGS, '', text))            
+            rval.append(text)
+            logger.info(f"Message with ID {message['id']} added to list")
 
         return rval
     else:
@@ -130,7 +128,6 @@ def getEventDetails(service, msg_list):
     # Process the text
     messages = [i.split('\n') for i in messages]
     messages = [[j for j in i if j] for i in messages]
-
     # Get the event details
     for i in messages:
         event: dict = {}
@@ -148,10 +145,14 @@ def createEvent(events):
     """Takes a list of events and creates them on the calendar.
     """
     calendar = GoogleCalendar(credentials_path='credentials.json')
+    # for i in calendar.get_calendar_list():
+    #     print(i.summary)
+    #     print(i.calendar_id)
 
     for event in events:
         start_date = datetime.strptime(event['start'], '%Y/%m/%d').date()
         end_date = datetime.strptime(event['end'], '%Y/%m/%d').date()
+        end_date = (end_date + timedelta(days=1))
 
         new_event = Event(
             summary=f"{event['name']} - {event['category']}",
@@ -159,7 +160,7 @@ def createEvent(events):
             end=end_date,
         )
 
-        calendar.add_event(new_event)
+        calendar.add_event(new_event, calendar_id='c_a0b924988ea1829e240a2db34c29d3e8c1be75f4a202c74748e7719e8e4415bd@group.calendar.google.com')
         logger.info(
             f"Event {event['name']}, from {event['start']} to {event['end']}, added to calendar")
 
@@ -173,8 +174,8 @@ def main():
         gmail = init()
         messages: list[str] = getMessages(gmail)
         if (messages):
-            events = getEventDetails(gmail, messages)
-            createEvent(events)
+           events = getEventDetails(gmail, messages)
+           createEvent(events)
 
     except HttpError as error:
         print(f'An error occurred: {error}')
